@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>InstaBooth AI - Powered by Clawdbot</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;700&family=ZCOOL+KuaiLe&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Space Grotesk', sans-serif; background: #0f172a; color: white; overflow-x: hidden; }
+        .font-cute { font-family: 'ZCOOL KuaiLe', cursive; }
+        
+        /* Glassmorphism */
+        .glass { background: rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.2); }
+        .glass-dark { background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        
+        /* Camera & Filters */
+        video { transform: scaleX(-1); object-fit: cover; }
+        .filter-grayscale { filter: grayscale(1); }
+        .filter-sepia { filter: sepia(0.8); }
+        .filter-bright { filter: brightness(1.2) contrast(1.1); }
+        .filter-vintage { filter: sepia(0.4) contrast(1.2) saturate(0.8); }
+        .filter-soft { filter: brightness(1.1) blur(0.5px); }
+
+        /* Animations */
+        @keyframes flash { 0% { opacity: 1; } 100% { opacity: 0; } }
+        .flash-anim { animation: flash 0.15s ease-out; background: white; position: fixed; inset: 0; z-index: 50; pointer-events: none; opacity: 0; }
+        
+        /* Enhanced Shutter Button Animation */
+        .shutter-btn { box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.3); transition: all 0.2s ease-out; }
+        .shutter-btn:hover { box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.4); transform: scale(1.05); }
+        .shutter-btn:active { transform: scale(0.95); box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.5); }
+        
+        /* Active Filter Button Glow */
+        .filter-active { box-shadow: 0 0 10px 3px rgba(255, 255, 255, 0.5); transform: scale(1.1); transition: all 0.2s ease-out; }
+        
+        /* Countdown Number Pop */
+        @keyframes countdownPop { 0% { transform: scale(0.5); opacity: 0; } 50% { transform: scale(1.2); } 100% { transform: scale(1); opacity: 1; } }
+        .countdown-number { animation: countdownPop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+        
+        /* Gallery Panel Fade In */
+        @keyframes fadeInRight { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+        .gallery-panel-show { display: flex !important; animation: fadeInRight 0.4s ease-out forwards; }
+        
+        /* Subtle Viewfinder Breathing Effect */
+        @keyframes viewfinderBreath {
+            0%, 100% { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1); }
+            50% { box-shadow: inset 0 0 10px 2px rgba(255, 255, 255, 0.15); }
+        }
+        .viewfinder-animated {
+            animation: viewfinderBreath 8s ease-in-out infinite;
+        }
+    </style>
+</head>
+<body class="h-screen flex flex-col md:flex-row">
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 0px; background: transparent; }
+    </style>
+</head>
+<body class="h-screen flex flex-col md:flex-row">
+
+    <!-- Flash Overlay -->
+    <div id="flash" class="flash-anim"></div>
+
+    <!-- LEFT: Camera & Controls -->
+    <div class="flex-1 flex flex-col relative bg-black">
+        <!-- Header -->
+        <div class="absolute top-0 left-0 right-0 p-4 z-20 flex justify-between items-center bg-gradient-to-b from-black/50 to-transparent">
+            <div class="flex items-center gap-2">
+                <div class="w-3 h-3 rounded-full bg-red-500 animate-pulse"></div>
+                <span class="text-xs font-bold tracking-widest text-white/80">CLAWDBOT AI</span>
+            </div>
+            <div class="flex gap-3">
+                <button onclick="toggleCam()" class="p-2 rounded-full bg-white/10 backdrop-blur hover:bg-white/20">🔄</button>
+            </div>
+        </div>
+
+        <!-- Viewfinder -->
+        <div class="relative flex-1 overflow-hidden flex items-center justify-center viewfinder-animated">
+            <video id="video" autoplay playsinline class="w-full h-full"></video>
+            
+            <!-- Countdown -->
+            <div id="countdown" class="hidden absolute inset-0 flex items-center justify-center z-30 pointer-events-none">
+                <span id="count-num" class="text-[10rem] font-bold text-white drop-shadow-2xl font-cute animate-bounce">3</span>
+            </div>
+            
+            <!-- Grid Lines -->
+            <div class="absolute inset-0 grid grid-cols-2 grid-rows-2 pointer-events-none opacity-20 border-white">
+                <div class="border-r border-b border-white"></div>
+                <div class="border-b border-white"></div>
+                <div class="border-r border-white"></div>
+                <div></div>
+            </div>
+        </div>
+
+        <!-- Bottom Controls -->
+        <div class="p-6 pb-10 bg-black flex flex-col gap-6 items-center z-20">
+            <!-- Filters -->
+            <div class="flex gap-4 overflow-x-auto w-full justify-center pb-2">
+                <button onclick="setFilter('')" class="text-xs text-white/60 hover:text-white flex flex-col items-center gap-1"><span class="w-10 h-10 rounded-full bg-gradient-to-tr from-gray-700 to-gray-600 border border-white/30"></span>Normal</button>
+                <button onclick="setFilter('filter-bright')" class="text-xs text-white/60 hover:text-white flex flex-col items-center gap-1"><span class="w-10 h-10 rounded-full bg-white border border-white/30"></span>Bright</button>
+                <button onclick="setFilter('filter-vintage')" class="text-xs text-white/60 hover:text-white flex flex-col items-center gap-1"><span class="w-10 h-10 rounded-full bg-orange-200 sepia border border-white/30"></span>Vintage</button>
+                <button onclick="setFilter('filter-grayscale')" class="text-xs text-white/60 hover:text-white flex flex-col items-center gap-1"><span class="w-10 h-10 rounded-full bg-gray-400 grayscale border border-white/30"></span>Mono</button>
+            </div>
+
+            <div class="flex items-center gap-10">
+                <!-- Frame Select -->
+                <div class="flex flex-col gap-1 items-center">
+                    <span class="text-[10px] text-gray-400 uppercase">Layout</span>
+                    <button onclick="toggleLayout()" id="layout-btn" class="text-2xl">🎞️</button>
+                </div>
+
+                <!-- Shutter -->
+                <button id="btn-capture" class="w-20 h-20 rounded-full bg-white shutter-btn flex items-center justify-center">
+                    <div class="w-16 h-16 rounded-full border-2 border-black/10"></div>
+                </button>
+
+                <!-- Color Select -->
+                <div class="flex flex-col gap-1 items-center">
+                    <span class="text-[10px] text-gray-400 uppercase">Color</span>
+                    <div class="flex gap-1">
+                        <button onclick="setBg('#fff')" class="w-6 h-6 rounded-full bg-white border"></button>
+                        <button onclick="setBg('#111')" class="w-6 h-6 rounded-full bg-gray-900 border border-white/30"></button>
+                        <button onclick="setBg('#fbcfe8')" class="w-6 h-6 rounded-full bg-pink-200 border"></button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- RIGHT: Result / Gallery (Hidden on mobile until captured) -->
+    <div id="gallery-panel" class="hidden md:flex md:w-96 bg-slate-900 border-l border-white/10 flex-col p-6 overflow-y-auto">
+        <h2 class="text-xl font-bold mb-4 font-cute">✨ 你的照片</h2>
+        
+        <!-- Live Strip Preview -->
+        <div id="strip-container" class="bg-white p-4 transition-colors duration-300 shadow-2xl mx-auto origin-top transform scale-90">
+            <div id="strip-content" class="flex flex-col gap-3">
+                <!-- Header -->
+                <div class="flex justify-between items-end px-1 pb-1 border-b-2 border-black/10">
+                    <h1 class="text-2xl font-black text-black tracking-tighter" id="brand-text">CLAWDBOT</h1>
+                    <span class="text-[10px] text-gray-400 font-mono" id="date-text">2026.02.02</span>
+                </div>
+                
+                <!-- Photos go here -->
+                <div id="photo-slots" class="flex flex-col gap-3">
+                    <div class="aspect-[4/3] bg-gray-100 flex items-center justify-center text-gray-300 text-2xl font-cute">1</div>
+                    <div class="aspect-[4/3] bg-gray-100 flex items-center justify-center text-gray-300 text-2xl font-cute">2</div>
+                    <div class="aspect-[4/3] bg-gray-100 flex items-center justify-center text-gray-300 text-2xl font-cute">3</div>
+                    <div class="aspect-[4/3] bg-gray-100 flex items-center justify-center text-gray-300 text-2xl font-cute">4</div>
+                </div>
+
+                <!-- Footer -->
+                <div class="pt-2 flex justify-center">
+                    <p class="text-[10px] text-gray-400 uppercase tracking-widest">AI Generated Memory</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="mt-6 flex flex-col gap-3">
+            <button id="btn-download" class="w-full py-3 bg-pink-500 hover:bg-pink-600 rounded-xl font-bold shadow-lg shadow-pink-500/30 transition">保存照片 💾</button>
+            <button id="btn-restart" class="w-full py-3 bg-white/10 hover:bg-white/20 rounded-xl font-bold transition">再拍一次 🔄</button>
+        </div>
+    </div>
+
+    <!-- Mobile Modal for Result -->
+    <div id="mobile-modal" class="fixed inset-0 z-50 bg-black/90 hidden flex flex-col items-center justify-center p-4">
+        <div id="mobile-preview-area" class="w-full max-w-sm max-h-[80vh] overflow-y-auto mb-4 rounded-lg"></div>
+        <div class="flex gap-4 w-full max-w-sm">
+            <button onclick="downloadStrip()" class="flex-1 py-3 bg-pink-500 rounded-xl font-bold">保存</button>
+            <button onclick="closeMobileModal()" class="flex-1 py-3 bg-white/20 rounded-xl font-bold">关闭</button>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
