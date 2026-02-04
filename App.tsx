@@ -1,61 +1,52 @@
 import { useState } from 'react';
-import { Camera, Sparkles } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { ArrowRight } from 'lucide-react';
 import { useWebcam } from './hooks/useWebcam';
 import { AppStatus, FILTERS, PhotoData } from './types';
 import PhotoStrip from './components/PhotoStrip';
+import { cn } from './lib/utils';
 
-const CAPTURE_COUNT = 4;
-const COUNTDOWN_TIME = 3;
-
-// Synthesize sound effects to avoid external dependencies
-const playSound = (type: 'beep' | 'shutter' | 'finish') => {
+// Elegant Sound Engine
+const playSound = (type: 'tick' | 'shutter' | 'start') => {
   const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
   if (!AudioContext) return;
   const ctx = new AudioContext();
+  const t = ctx.currentTime;
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
-
   osc.connect(gain);
   gain.connect(ctx.destination);
 
-  const now = ctx.currentTime;
-  if (type === 'beep') {
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(880, now);
-    osc.frequency.exponentialRampToValueAtTime(440, now + 0.1);
-    gain.gain.setValueAtTime(0.1, now);
-    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
-    osc.start(now);
-    osc.stop(now + 0.1);
-  } else if (type === 'shutter') {
-    // White noise burst for shutter
-    const bufferSize = ctx.sampleRate * 0.1;
-    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) {
-      data[i] = Math.random() * 2 - 1;
-    }
-    const noise = ctx.createBufferSource();
-    noise.buffer = buffer;
-    const noiseGain = ctx.createGain();
-    noiseGain.gain.setValueAtTime(0.3, now);
-    noiseGain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
-    noise.connect(noiseGain);
-    noiseGain.connect(ctx.destination);
-    noise.start(now);
-  } else if (type === 'finish') {
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(440, now);
-    osc.frequency.linearRampToValueAtTime(880, now + 0.2);
-    gain.gain.setValueAtTime(0.1, now);
-    gain.gain.linearRampToValueAtTime(0, now + 0.4);
-    osc.start(now);
-    osc.stop(now + 0.4);
+  switch (type) {
+    case 'tick':
+      // Soft, wood-block tick
+      osc.frequency.setValueAtTime(800, t);
+      osc.frequency.exponentialRampToValueAtTime(100, t + 0.05);
+      gain.gain.setValueAtTime(0.1, t);
+      gain.gain.exponentialRampToValueAtTime(0.01, t + 0.05);
+      osc.start(t);
+      osc.stop(t + 0.05);
+      break;
+    case 'shutter':
+      // Crisp mechanical shutter
+      const bufSize = ctx.sampleRate * 0.1;
+      const buffer = ctx.createBuffer(1, bufSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufSize; i++) data[i] = (Math.random() - 0.5) * 0.5;
+      const noise = ctx.createBufferSource();
+      noise.buffer = buffer;
+      const nGain = ctx.createGain();
+      nGain.gain.setValueAtTime(0.8, t);
+      nGain.gain.exponentialRampToValueAtTime(0.01, t + 0.08);
+      noise.connect(nGain);
+      nGain.connect(ctx.destination);
+      noise.start(t);
+      break;
   }
 };
 
 export default function App() {
-  const { videoRef, error } = useWebcam();
+  const { videoRef, isLoading } = useWebcam();
   const [status, setStatus] = useState<AppStatus>('idle');
   const [activeFilterId, setActiveFilterId] = useState<string>('normal');
   const [photos, setPhotos] = useState<PhotoData[]>([]);
@@ -64,256 +55,215 @@ export default function App() {
   const [stripColor, setStripColor] = useState('white');
 
   const activeFilter = FILTERS.find(f => f.id === activeFilterId) || FILTERS[0];
+  const CAPTURE_TOTAL = 4;
 
-  const captureFrame = () => {
+  const capture = () => {
     if (!videoRef.current) return;
     const video = videoRef.current;
     const canvas = document.createElement('canvas');
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     const ctx = canvas.getContext('2d');
+    if (!ctx) return;
 
-    if (ctx) {
-      // 1. Draw Video
-      // Flip horizontally if it's the user camera to mirror expectation
-      ctx.translate(canvas.width, 0);
-      ctx.scale(-1, 1);
-
-      // Apply CSS-like filters via context filter (supported in modern browsers)
-      if (activeFilter.cssFilter !== 'none') {
-        ctx.filter = activeFilter.cssFilter;
-      }
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-      // Reset transform for overlays
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.filter = 'none';
-
-      // 2. Apply Canvas-based Overlays (Grain/Vignette) if filter requests it
-      if (activeFilter.hasOverlay) {
-        // Vignette
-        const gradient = ctx.createRadialGradient(
-          canvas.width / 2,
-          canvas.height / 2,
-          canvas.height / 3,
-          canvas.width / 2,
-          canvas.height / 2,
-          canvas.height
-        );
-        gradient.addColorStop(0, 'rgba(0,0,0,0)');
-        gradient.addColorStop(1, 'rgba(0,0,0,0.6)');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-      }
-
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
-      setPhotos(prev => [...prev, { id: Date.now().toString(), dataUrl, filterId: activeFilterId }]);
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
+    
+    if (activeFilter.cssFilter !== 'none') {
+      ctx.filter = activeFilter.cssFilter;
     }
+    
+    ctx.drawImage(video, 0, 0);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.filter = 'none';
+
+    // Always add subtle grain for "Editorial" look
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+    for (let i = 0; i < data.length; i += 4) {
+      const noise = (Math.random() - 0.5) * 15;
+      data[i] = Math.max(0, Math.min(255, data[i] + noise));
+      data[i+1] = Math.max(0, Math.min(255, data[i+1] + noise));
+      data[i+2] = Math.max(0, Math.min(255, data[i+2] + noise));
+    }
+    ctx.putImageData(imageData, 0, 0);
+
+    setPhotos(prev => [...prev, { id: Date.now().toString(), dataUrl: canvas.toDataURL('image/jpeg', 0.98), filterId: activeFilterId }]);
   };
 
-  const startPhotoboothSession = async () => {
+  const startSession = async () => {
     setPhotos([]);
     setStatus('countdown');
 
-    for (let i = 0; i < CAPTURE_COUNT; i++) {
-      // Countdown phase
+    for (let i = 0; i < CAPTURE_TOTAL; i++) {
       setStatus('countdown');
-      for (let c = COUNTDOWN_TIME; c > 0; c--) {
+      for (let c = 3; c > 0; c--) {
         setCountdown(c);
-        playSound('beep');
-        await new Promise(r => setTimeout(r, 1000));
+        playSound('tick');
+        await new Promise(r => setTimeout(r, 900));
       }
-
-      // Capture phase
+      
       setStatus('capturing');
       setFlash(true);
       playSound('shutter');
-      captureFrame();
+      capture();
       await new Promise(r => setTimeout(r, 100));
-
       setFlash(false);
 
-      // Brief review/pause phase
-      if (i < CAPTURE_COUNT - 1) {
+      if (i < CAPTURE_TOTAL - 1) {
         await new Promise(r => setTimeout(r, 800));
       }
     }
-    playSound('finish');
+    
     setStatus('review');
   };
 
-  const reset = () => {
-    setStatus('idle');
-    setPhotos([]);
-  };
-
-  if (error) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-red-950 text-white p-4">
-        <div className="bg-red-900/50 backdrop-blur-lg p-8 rounded-2xl shadow-2xl max-w-md text-center border border-red-800">
-          <Camera className="w-16 h-16 mx-auto mb-6 opacity-50" />
-          <h2 className="text-2xl font-bold mb-3">Camera Access Needed</h2>
-          <p className="text-red-200">{error}</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="min-h-screen flex flex-col items-center py-6 px-4 sm:px-6 relative overflow-x-hidden selection:bg-indigo-500/30">
-      {/* Header */}
-      <header className="mb-8 z-10 text-center relative group cursor-default">
-        <div className="absolute inset-0 bg-indigo-500/20 blur-[50px] rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-700"></div>
-        <h1 className="relative text-5xl md:text-6xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-br from-white via-indigo-200 to-white/50 drop-shadow-sm">
-          LUMINA
-        </h1>
-        <p className="relative mt-2 text-indigo-200/50 font-medium tracking-[0.3em] text-xs uppercase">
-          Studio Photobooth
-        </p>
-      </header>
+    <div className="min-h-screen bg-[#080808] text-[#f4f4f0] font-serif overflow-x-hidden selection:bg-white/20">
+      
+      {/* Noise Texture Background */}
+      <div className="fixed inset-0 pointer-events-none opacity-[0.04] mix-blend-overlay z-0" 
+           style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")` }}>
+      </div>
 
-      <main className="w-full max-w-6xl z-10 flex flex-col lg:flex-row gap-8 lg:gap-12 items-start justify-center">
-        {/* Left Side: Viewfinder & Controls */}
-        <div className={`flex flex-col gap-6 w-full lg:max-w-xl transition-all duration-700 ease-out transform ${status === 'review' ? 'hidden lg:flex lg:opacity-40 lg:pointer-events-none lg:scale-95 lg:blur-[2px]' : 'opacity-100 scale-100'}`}>
-          {/* Viewfinder Container */}
-          <div className="relative aspect-[4/3] w-full bg-gray-900 rounded-[2rem] overflow-hidden shadow-2xl ring-8 ring-white/5 group">
-            {/* Live Video Feed */}
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              className="w-full h-full object-cover transform scale-x-[-1] transition-all duration-300"
-              style={{ filter: activeFilter.cssFilter }}
-            />
-
-            {/* Vignette/Grain Overlay (Visual only, actual burned in canvas) */}
-            {activeFilter.hasOverlay && (
-              <div
-                className="absolute inset-0 pointer-events-none z-0"
-                style={{
-                  background: 'radial-gradient(circle, transparent 50%, rgba(0,0,0,0.4) 100%)',
-                  boxShadow: 'inset 0 0 50px rgba(0,0,0,0.5)',
-                }}
-              />
-            )}
-
-            {/* UI Overlays */}
-            <div className="absolute inset-0 z-10 flex flex-col justify-between p-6">
-              <div className="flex justify-between items-start">
-                <div className="px-3 py-1 bg-black/40 backdrop-blur-md rounded-full text-[10px] font-bold uppercase tracking-wider text-white/70 border border-white/10 shadow-lg">
-                  {activeFilter.name}
-                </div>
-
-                <div className="flex gap-1.5">
-                  {Array.from({ length: CAPTURE_COUNT }).map((_, i) => (
-                    <div
-                      key={i}
-                      className={`h-1.5 rounded-full transition-all duration-300 ${
-                        i < photos.length ? 'w-6 bg-indigo-400 shadow-[0_0_10px_rgba(129,140,248,0.5)]' : 'w-1.5 bg-white/20'
-                      }`}
-                    />
-                  ))}
-                </div>
-              </div>
+      <AnimatePresence mode="wait">
+        
+        {/* === IDLE SCREEN: Minimal Editorial === */}
+        {status === 'idle' && (
+          <motion.div 
+            key="idle"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0, scale: 1.05, filter: "blur(10px)" }}
+            transition={{ duration: 0.8 }}
+            className="relative z-10 min-h-screen flex flex-col items-center justify-between py-12 px-6"
+          >
+            <div className="w-full max-w-7xl flex justify-between items-start border-b border-white/10 pb-6">
+              <span className="text-xs uppercase tracking-[0.3em] opacity-40 font-sans">Est. 2026</span>
+              <span className="text-xs uppercase tracking-[0.3em] opacity-40 font-sans">Lumina Studio</span>
             </div>
 
-            {/* Status Layers */}
-            {status === 'idle' && (
-              <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/20 backdrop-blur-[2px] transition-all duration-500 group-hover:backdrop-blur-none group-hover:bg-black/10">
-                <button
-                  onClick={startPhotoboothSession}
-                  className="group/btn relative flex items-center gap-3 px-10 py-5 bg-white text-black rounded-full overflow-hidden hover:scale-105 active:scale-95 transition-all duration-300 shadow-[0_0_50px_-10px_rgba(255,255,255,0.5)]"
-                >
-                  <div className="absolute inset-0 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 opacity-0 group-hover/btn:opacity-10 transition-opacity duration-300" />
-                  <Camera size={24} strokeWidth={2.5} />
-                  <span className="font-bold text-lg tracking-tight">Start Booth</span>
-                </button>
-              </div>
-            )}
-
-            {status === 'countdown' && (
-              <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/10 backdrop-blur-[1px]">
-                <div
-                  key={countdown}
-                  className="text-[12rem] font-black text-white drop-shadow-[0_10px_30px_rgba(0,0,0,0.5)] animate-pop leading-none"
-                >
-                  {countdown}
-                </div>
-              </div>
-            )}
-
-            {/* Flash Effect */}
-            <div
-              className={`absolute inset-0 z-50 bg-white pointer-events-none mix-blend-overlay transition-opacity duration-100 ease-out ${
-                flash ? 'opacity-100' : 'opacity-0'
-              }`}
-            />
-            <div
-              className={`absolute inset-0 z-50 bg-white pointer-events-none transition-opacity duration-75 ease-out ${
-                flash ? 'opacity-40' : 'opacity-0'
-              }`}
-            />
-          </div>
-
-          {/* Filter Selection */}
-          <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-5 rounded-3xl w-full shadow-xl">
-            <div className="flex items-center gap-2 mb-4 px-1">
-              <Sparkles size={14} className="text-indigo-300" />
-              <span className="text-xs font-bold uppercase tracking-widest text-indigo-100/60">Effect Library</span>
+            <div className="flex flex-col items-center gap-8">
+              <motion.h1 
+                initial={{ y: 20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ delay: 0.2, duration: 0.8 }}
+                className="text-8xl md:text-[10rem] font-light leading-none tracking-tighter italic mix-blend-difference"
+              >
+                Lumina
+              </motion.h1>
+              
+              <motion.button
+                onClick={startSession}
+                disabled={isLoading}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                className="group flex items-center gap-4 px-8 py-4 bg-[#f4f4f0] text-black rounded-sm transition-all hover:bg-white disabled:opacity-50"
+              >
+                <span className="font-sans text-xs font-bold uppercase tracking-[0.2em]">{isLoading ? 'Loading...' : 'Start Capture'}</span>
+                <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
+              </motion.button>
             </div>
-            <div className="flex gap-4 overflow-x-auto hide-scrollbar pb-2 px-1 snap-x">
-              {FILTERS.map((filter) => (
-                <button
-                  key={filter.id}
-                  onClick={() => setActiveFilterId(filter.id)}
-                  disabled={status !== 'idle'}
-                  className={`relative flex flex-col items-center gap-2 min-w-[80px] snap-center transition-all duration-300 group ${
-                    status !== 'idle' ? 'opacity-50 cursor-not-allowed grayscale' : 'opacity-100 hover:opacity-100'
-                  }`}
-                >
-                  <div
-                    className={`relative w-20 h-20 rounded-2xl shadow-lg border-2 transition-all duration-300 overflow-hidden ${
-                      activeFilterId === filter.id ? 'border-indigo-400 scale-100 ring-4 ring-indigo-500/20' : 'border-transparent scale-95 opacity-70 group-hover:scale-100 group-hover:opacity-100'
-                    }`}
-                  >
-                    {/* Preview Box Color */}
-                    <div
-                      className={`w-full h-full ${filter.previewColor}`}
-                      style={{ filter: filter.cssFilter }}
-                    />
-                    {/* Active Indicator */}
-                    {activeFilterId === filter.id && (
-                      <div className="absolute inset-0 flex items-center justify-center bg-black/20">
-                        <div className="w-2 h-2 bg-white rounded-full shadow-[0_0_10px_white]" />
-                      </div>
-                    )}
-                  </div>
-                  <span
-                    className={`text-[10px] font-bold uppercase tracking-wider transition-colors ${
-                      activeFilterId === filter.id ? 'text-white' : 'text-white/40 group-hover:text-white/70'
-                    }`}
-                  >
-                    {filter.name}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
 
-        {/* Right Side: Result Strip */}
-        {(status === 'review' || photos.length > 0) && (
-          <div className="w-full lg:w-auto flex justify-center">
-            <PhotoStrip photos={photos} selectedColorId={stripColor} onColorChange={setStripColor} onRetake={reset} />
-          </div>
+            <div className="w-full max-w-7xl border-t border-white/10 pt-6 flex justify-between">
+              <span className="text-[10px] font-sans uppercase tracking-widest opacity-30">Web Camera Access Required</span>
+              <span className="text-[10px] font-sans uppercase tracking-widest opacity-30">v3.0 Editorial</span>
+            </div>
+          </motion.div>
         )}
-      </main>
 
-      {/* Ambient Background Lights */}
-      <div className="fixed top-0 left-1/4 w-[500px] h-[500px] bg-indigo-600/20 rounded-full blur-[120px] pointer-events-none -z-10 mix-blend-screen animate-pulse" style={{ animationDuration: '4s' }} />
-      <div className="fixed bottom-0 right-1/4 w-[600px] h-[600px] bg-fuchsia-600/10 rounded-full blur-[150px] pointer-events-none -z-10 mix-blend-screen" />
-      <div className="fixed inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-2" />
+        {/* === SHOOTING UI: Clean & Distraction Free === */}
+        {(status === 'countdown' || status === 'capturing') && (
+          <motion.div
+            key="camera"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="relative z-10 h-screen flex flex-col bg-black"
+          >
+             {/* Flash Layer */}
+             <div className={cn(
+               "absolute inset-0 bg-white z-50 pointer-events-none transition-opacity duration-[50ms]",
+               flash ? "opacity-100" : "opacity-0"
+             )} />
+
+             {/* The Viewfinder */}
+             <div className="relative flex-1 flex items-center justify-center overflow-hidden">
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="absolute min-w-full min-h-full object-cover transform scale-x-[-1]"
+                  style={{ filter: activeFilter.cssFilter }}
+                />
+                
+                {/* Guide Lines (Rule of Thirds) - Very faint */}
+                <div className="absolute inset-0 border-[0.5px] border-white/5 pointer-events-none grid grid-cols-3 grid-rows-3">
+                   <div className="border-r border-white/5 h-full" />
+                   <div className="border-r border-white/5 h-full" />
+                   <div className="col-span-3 border-b border-white/5 w-full h-px absolute top-1/3" />
+                   <div className="col-span-3 border-b border-white/5 w-full h-px absolute top-2/3" />
+                </div>
+
+                {/* Big Minimal Countdown */}
+                <AnimatePresence>
+                  {status === 'countdown' && (
+                    <motion.div 
+                      key={countdown}
+                      initial={{ opacity: 0, scale: 0.8 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 1.2 }}
+                      className="absolute z-20 text-[15rem] font-light italic text-white mix-blend-difference font-serif"
+                    >
+                      {countdown}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Shot Counter */}
+                <div className="absolute bottom-8 right-8 font-sans text-xs font-bold tracking-[0.2em] uppercase text-white/50">
+                  {photos.length + 1} / {CAPTURE_TOTAL}
+                </div>
+             </div>
+
+             {/* Minimal Filter Bar */}
+             <div className="h-24 bg-black flex items-center justify-center gap-8 border-t border-white/10">
+                {FILTERS.map(f => (
+                   <button 
+                     key={f.id}
+                     onClick={() => setActiveFilterId(f.id)}
+                     className={cn(
+                       "font-sans text-[10px] uppercase tracking-widest transition-all",
+                       activeFilterId === f.id ? "text-white border-b border-white pb-1" : "text-white/40 hover:text-white/70"
+                     )}
+                   >
+                     {f.name}
+                   </button>
+                ))}
+             </div>
+          </motion.div>
+        )}
+
+        {/* === RESULT: Gallery View === */}
+        {status === 'review' && (
+          <motion.div
+            key="review"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="relative z-10 min-h-screen bg-[#f4f4f0] text-black flex flex-col"
+          >
+             <div className="flex-1 flex flex-col items-center justify-center p-8">
+                <PhotoStrip 
+                  photos={photos} 
+                  selectedColorId={stripColor}
+                  onColorChange={setStripColor}
+                  onRetake={startSession}
+                />
+             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -4,13 +4,11 @@ export default defineConfig(async () => {
   const { default: react } = await import('@vitejs/plugin-react');
   return {
     plugins: [react()],
+    base: '/photobooth/',
     build: {
       outDir: './dist',
       emptyOutDir: true,
       rollupOptions: {
-        input: {
-          main: './public/index.html', // Specify the HTML file as entry point
-        },
         output: {
           assetFileNames: (assetInfo) => {
             if (assetInfo.name.endsWith('.css')) {
